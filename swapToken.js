@@ -5,17 +5,22 @@ const { TradeType, Percent } = require('@uniswap/sdk');
 const { JSBI } = require('@uniswap/sdk');
 const readline = require('readline-sync');
 const fs = require('fs');
+require('dotenv').config();
 
-const abi = fs.readFileSync('./build/interfaces/IERC20abi.json');
+const abi = fs.readFileSync('./interfaces/IERC20abi.json');
+const routerAbi = JSON.parse(fs.readFileSync('./interfaces/Router.json'));
 const IERC20abi = JSON.parse(abi);
 const V3_SWAP_ROUTER_ADDRESS = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45';
 const CHAIN_ID = 42161;
 const provider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
-const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const wallet = new ethers.Wallet(privateKey, provider);
+const privateKey = process.env.PVT_KEY;
+// const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const web3Provider = new ethers.providers.JsonRpcProvider("http://localhost:8545");
+const wallet = new ethers.Wallet(privateKey, web3Provider);
 const router = new AlphaRouter({ chainId: 42161, provider: provider});
-const MY_ADDRESS = wallet.address;  // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+const MY_ADDRESS = wallet.address;  // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, 0xe0C97480CA7BDb33B2CD9810cC7f103188de4383
+const ROUTER_CONTRACT = new ethers.Contract(V3_SWAP_ROUTER_ADDRESS, routerAbi, provider);
+const iface = new ethers.utils.Interface(['function multicall(uint256,bytes[])']);
 const choices = {
 	1: 'spa',
 	2: 'usds',
@@ -28,22 +33,6 @@ const choices = {
 	// 9: 'vela',
 }
 
-
-
-// const WETH = new Token(
-// 	CHAIN_ID,
-// 	'0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-// 	18,
-// 	'WETH',
-// 	'Wrapped Ether'
-//   );
-// const USDC = new Token(
-// 	CHAIN_ID,
-// 	'0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
-// 	6,
-// 	'USDC',
-// 	'USD//C'
-//   );
 // const typedValueParsed = '100000000000000000000'
 // const wethAmount = CurrencyAmount.fromRawAmount(WETH, JSBI.BigInt(typedValueParsed));
 
@@ -94,6 +83,7 @@ async function convertTokenToCurrency(token) {
 
 // A function to do the swap
 async function swapOnUniswap(selectionIn, selectionOut) {
+	console.log("\n\nSwapping ", choices[selectionIn], "and", choices[selectionOut]);
 	let srcToken = await token_obj(choices[selectionIn]);
 	let dstToken = await token_obj(choices[selectionOut]);
 	// let swapper = funds(choices[selectionIn]);
@@ -102,37 +92,66 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 	let bal = balance / 10**decimals;
     console.log(choices[selectionIn], 'Balance of the account is', bal);
 	let srcCurrency = await convertTokenToCurrency(srcToken);
-	balance = "800000000000000000000000";
-	let amount = CurrencyAmount.fromRawAmount(srcCurrency, JSBI.BigInt(balance));
+	let dstCurrency = await convertTokenToCurrency(dstToken);
+	balStr = balance.toLocaleString('fullwide', { useGrouping: false });
+	balStr = '100000000000000000000000'
+	let amount = CurrencyAmount.fromRawAmount(srcCurrency, JSBI.BigInt(balStr));
 	const route = await router.route(
 		amount,
-		dstToken,
+		dstCurrency,
 		TradeType.EXACT_INPUT,
 		{
 		  recipient: MY_ADDRESS,
-		  slippageTolerance: new Percent(5, 100),
+		  slippageTolerance: new Percent(15, 100),
 		  deadline: Math.floor(Date.now()/1000 +1800)
+		},
+		{
+			v2PoolSelection: [],
+			v3PoolSelection: [],
 		}
 	);
-	console.log(route);
+	if (route){
+		console.log("Found a route");
+		console.log(route);
+		console.log("decoding data");
+		console.log(iface.decodeFunctionData('multicall', route.methodParameters.calldata))
+		var nc = await wallet.getTransactionCount();
+		const transaction = {
+			data: route.methodParameters.calldata,
+			nonce: nc,
+			to: V3_SWAP_ROUTER_ADDRESS,
+			value: BigNumber.from(0),
+			from: MY_ADDRESS,
+			gasPrice: BigNumber.from(route.gasPriceWei),
+			gasLimit: BigNumber.from(route.estimatedGasUsed).add(BigNumber.from("50000")),
+		};
+		const signedTx = await wallet.signTransaction(transaction);
+		console.log("Sending tx")
+		let balBefore =  await dstToken.balanceOf(MY_ADDRESS);
+		console.log("Balance before "+ balBefore);
+		await web3Provider.sendTransaction(signedTx);
+		let balAfter = await dstToken.balanceOf(MY_ADDRESS);
+		console.log("Balance after "+ balAfter);
+		let received = balAfter - balBefore;
+		let dec = dstToken.decimals()
+		received = received / Math.pow(10, dec);
+		console.log('Received ', received, choices[selectionOut]);
+	}
+	else{
+		console.log('No valid route found');
+	}
 }
 
 async function main() {
 	console.log("This script will help you to swap tokens using Uniswap\n");
-	await swapOnUniswap(1, 2);
-	if (route){
-		const transaction = {
-			data: route.methodParameters.calldata,
-			to: V3_SWAP_ROUTER_ADDRESS,
-			value: BigNumber.from(route.methodParameters.value),
-			from: MY_ADDRESS,
-			gasPrice: BigNumber.from(route.gasPriceWei),
-		};
-		console.log(route)
-		// await web3provider.sendTransaction(transaction);
+	const MAX_TOKENS = 9;
+	// await swapOnUniswap(1, 3);
+	for(let i=1; i < MAX_TOKENS; i++){
+		for(let j=2; j < MAX_TOKENS; j++){
+			if (i != j){
+				await swapOnUniswap(i, j);
+			}
+		}
 	}
-	else{
-		console.log('No valid route found');
-	}	
 }
 main();
