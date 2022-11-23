@@ -6,6 +6,8 @@ const { JSBI } = require('@uniswap/sdk');
 const readline = require('readline-sync');
 const fs = require('fs');
 require('dotenv').config();
+const query = require('cli-interact').getYesNo;
+
 
 const abi = fs.readFileSync('./interfaces/IERC20abi.json');
 const routerAbi = JSON.parse(fs.readFileSync('./interfaces/Router.json'));
@@ -20,7 +22,7 @@ const wallet = new ethers.Wallet(privateKey, web3Provider);
 const router = new AlphaRouter({ chainId: 42161, provider: provider});
 const MY_ADDRESS = wallet.address;  // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, 0xe0C97480CA7BDb33B2CD9810cC7f103188de4383
 const ROUTER_CONTRACT = new ethers.Contract(V3_SWAP_ROUTER_ADDRESS, routerAbi, provider);
-const iface = new ethers.utils.Interface(['function multicall(uint256,bytes[])']);
+const iface = new ethers.utils.Interface(['function exactInput((bytes,address,uint256,uint256))', 'function multicall(uint256,bytes[])', 'function exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))']);
 const choices = {
 	1: 'spa',
 	2: 'usds',
@@ -105,16 +107,17 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 		  slippageTolerance: new Percent(15, 100),
 		  deadline: Math.floor(Date.now()/1000 +1800)
 		},
-		{
-			v2PoolSelection: [],
-			v3PoolSelection: [],
-		}
 	);
 	if (route){
 		console.log("Found a route");
-		console.log(route);
-		console.log("decoding data");
-		console.log(iface.decodeFunctionData('multicall', route.methodParameters.calldata))
+		// console.log(route);
+		// console.log("decoding data");
+		let data = iface.decodeFunctionData('multicall', route.methodParameters.calldata);
+		console.log(route.methodParameters.calldata)
+		console.log(data[1]);
+		// let dat = data[1]
+		// let nextData = iface.decodeFunctionData('exactInput', dat);
+		// console.log(nextData)
 		var nc = await wallet.getTransactionCount();
 		const transaction = {
 			data: route.methodParameters.calldata,
@@ -128,26 +131,28 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 		const signedTx = await wallet.signTransaction(transaction);
 		console.log("Sending tx")
 		let balBefore =  await dstToken.balanceOf(MY_ADDRESS);
-		console.log("Balance before "+ balBefore);
+		// console.log("Balance before "+ balBefore);
 		await web3Provider.sendTransaction(signedTx);
+		console.log("Spent 100000 SPA");
 		let balAfter = await dstToken.balanceOf(MY_ADDRESS);
-		console.log("Balance after "+ balAfter);
+		// console.log("Balance after "+ balAfter);
 		let received = balAfter - balBefore;
-		let dec = dstToken.decimals()
-		received = received / Math.pow(10, dec);
-		console.log('Received ', received, choices[selectionOut]);
+		let dec = await dstToken.decimals()
+		let receivedFloat = received / Math.pow(10, dec);
+		console.log('Received ', receivedFloat, choices[selectionOut]);
 	}
 	else{
 		console.log('No valid route found');
 	}
+	var answer = query('Continue?');
 }
 
 async function main() {
 	console.log("This script will help you to swap tokens using Uniswap\n");
 	const MAX_TOKENS = 9;
-	// await swapOnUniswap(1, 3);
+	// await swapOnUniswap(1, 2);
 	for(let i=1; i < MAX_TOKENS; i++){
-		for(let j=2; j < MAX_TOKENS; j++){
+		for(let j=4; j < MAX_TOKENS; j++){
 			if (i != j){
 				await swapOnUniswap(i, j);
 			}

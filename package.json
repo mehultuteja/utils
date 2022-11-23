@@ -23,6 +23,7 @@
     "jsbi": "3.2.5"
   },
   "devDependencies": {
-    "@uniswap/smart-order-router": "^2.10.2"
+    "@uniswap/smart-order-router": "^2.10.2",
+    "cli-interact": "^0.1.9"
   }
 }
