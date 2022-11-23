@@ -1,4 +1,4 @@
-const { AlphaRouter } = require('@uniswap/smart-order-router');
+const { AlphaRouter, UniswapMulticallProvider } = require('@uniswap/smart-order-router');
 const { ethers, BigNumber } = require('ethers');
 const { Token, CurrencyAmount } = require('@uniswap/sdk-core');
 const { TradeType, Percent } = require('@uniswap/sdk');
@@ -152,7 +152,7 @@ async function main() {
 	const MAX_TOKENS = 9;
 	// await swapOnUniswap(1, 2);
 	for(let i=1; i < MAX_TOKENS; i++){
-		for(let j=4; j < MAX_TOKENS; j++){
+		for(let j=1; j < MAX_TOKENS; j++){
 			if (i != j){
 				await swapOnUniswap(i, j);
 			}
