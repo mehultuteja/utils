@@ -1,4 +1,4 @@
-const { AlphaRouter, UniswapMulticallProvider } = require('@uniswap/smart-order-router');
+const { AlphaRouter, UniswapMulticallProvider } = require('./smart-order-router/build/main');
 const { ethers, BigNumber } = require('ethers');
 const { Token, CurrencyAmount } = require('@uniswap/sdk-core');
 const { TradeType, Percent } = require('@uniswap/sdk');
@@ -39,7 +39,7 @@ const choices = {
 // const wethAmount = CurrencyAmount.fromRawAmount(WETH, JSBI.BigInt(typedValueParsed));
 
 // A function to get the token object
-async function token_obj(tokenName) {
+function token_obj(tokenName) {
 	let token_objects = {
 		'spa': new ethers.Contract('0x5575552988A3A80504bBaeB1311674fCFd40aD4B', IERC20abi, web3Provider),
 		'usds': new ethers.Contract('0xD74f5255D557944cf7Dd0E45FF521520002D5748', IERC20abi, web3Provider),
@@ -98,7 +98,7 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 	balStr = balance.toLocaleString('fullwide', { useGrouping: false });
 	balStr = '100000000000000000000000'
 	let amount = CurrencyAmount.fromRawAmount(srcCurrency, JSBI.BigInt(balStr));
-	const route = await router.route(
+	const enforced_route = await router.route(
 		amount,
 		dstCurrency,
 		TradeType.EXACT_INPUT,
@@ -107,8 +107,27 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 		  slippageTolerance: new Percent(15, 100),
 		  deadline: Math.floor(Date.now()/1000 +1800)
 		},
+		{
+			v3PoolSelection: {
+				topN: 0,
+				topNDirectSwaps: 0,
+				topNTokenInOut: 0,
+				topNSecondHop: 0,
+				enforceBaseTokens: [await convertTokenToCurrency(token_obj('usds'))]
+			}
+		}
 	);
-	if (route){
+	const generic_route = await router.route(
+		amount,
+		dstCurrency,
+		TradeType.EXACT_INPUT,
+		{
+			recipient: MY_ADDRESS,
+			slippageTolerance: new Percent(15, 100),
+			deadline: Math.floor(Date.now()/1000 + 1800)
+		}
+	);
+	if (enforced_route || generic_route){
 		console.log("Found a route");
 		// console.log(route);
 		// console.log("decoding data");
@@ -152,10 +171,8 @@ async function main() {
 	const MAX_TOKENS = 9;
 	// await swapOnUniswap(1, 2);
 	for(let i=1; i < MAX_TOKENS; i++){
-		for(let j=1; j < MAX_TOKENS; j++){
-			if (i != j){
-				await swapOnUniswap(i, j);
-			}
+		for(let j=i+1; j < MAX_TOKENS; j++){
+			await swapOnUniswap(i, j);
 		}
 	}
 }
