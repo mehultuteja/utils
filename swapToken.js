@@ -16,13 +16,13 @@ const V3_SWAP_ROUTER_ADDRESS = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45';
 const CHAIN_ID = 42161;
 const provider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
 const privateKey = process.env.PVT_KEY;
-// const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const web3Provider = new ethers.providers.JsonRpcProvider("http://localhost:8545");
 const wallet = new ethers.Wallet(privateKey, web3Provider);
 const router = new AlphaRouter({ chainId: 42161, provider: provider});
-const MY_ADDRESS = wallet.address;  // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, 0xe0C97480CA7BDb33B2CD9810cC7f103188de4383
-const ROUTER_CONTRACT = new ethers.Contract(V3_SWAP_ROUTER_ADDRESS, routerAbi, provider);
+const MY_ADDRESS = wallet.address;  // 0xe0C97480CA7BDb33B2CD9810cC7f103188de4383
+// const ROUTER_CONTRACT = new ethers.Contract(V3_SWAP_ROUTER_ADDRESS, routerAbi, wallet);
 const iface = new ethers.utils.Interface(['function exactInput((bytes,address,uint256,uint256))', 'function multicall(uint256,bytes[])', 'function exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))']);
+const ROUTER_CONTRACT = new ethers.Contract(V3_SWAP_ROUTER_ADDRESS, iface, wallet);
 const choices = {
 	1: 'spa',
 	2: 'usds',
@@ -34,9 +34,6 @@ const choices = {
 	8: 'l2dao',
 	// 9: 'vela',
 }
-
-// const typedValueParsed = '100000000000000000000'
-// const wethAmount = CurrencyAmount.fromRawAmount(WETH, JSBI.BigInt(typedValueParsed));
 
 // A function to get the token object
 function token_obj(tokenName) {
@@ -88,7 +85,6 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 	console.log("\n\nSwapping ", choices[selectionIn], "and", choices[selectionOut]);
 	let srcToken = await token_obj(choices[selectionIn]);
 	let dstToken = await token_obj(choices[selectionOut]);
-	// let swapper = funds(choices[selectionIn]);
 	let balance = await srcToken.balanceOf(MY_ADDRESS);
 	let decimals = await srcToken.decimals();
 	let bal = balance / 10**decimals;
@@ -96,27 +92,31 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 	let srcCurrency = await convertTokenToCurrency(srcToken);
 	let dstCurrency = await convertTokenToCurrency(dstToken);
 	balStr = balance.toLocaleString('fullwide', { useGrouping: false });
-	balStr = '100000000000000000000000'
+	balStr = '20000000000000000000000'  // This is the input amount which is hardcoded here.
 	let amount = CurrencyAmount.fromRawAmount(srcCurrency, JSBI.BigInt(balStr));
-	const enforced_route = await router.route(
-		amount,
-		dstCurrency,
-		TradeType.EXACT_INPUT,
-		{
-		  recipient: MY_ADDRESS,
-		  slippageTolerance: new Percent(15, 100),
-		  deadline: Math.floor(Date.now()/1000 +1800)
-		},
-		{
-			v3PoolSelection: {
-				topN: 0,
-				topNDirectSwaps: 0,
-				topNTokenInOut: 0,
-				topNSecondHop: 0,
-				enforceBaseTokens: [await convertTokenToCurrency(token_obj('usds'))]
+	let enforced_route;
+	// If tokenIn and tokenOut is not USDs
+	if(selectionIn != 2 && selectionOut != 2) {
+		enforced_route = await router.route(
+			amount,
+			dstCurrency,
+			TradeType.EXACT_INPUT,
+			{
+			recipient: MY_ADDRESS,
+			slippageTolerance: new Percent(15, 100),
+			deadline: Math.floor(Date.now()/1000 +18000)
+			},
+			{
+				v3PoolSelection: {
+					topN: 0,
+					topNDirectSwaps: 0,
+					topNTokenInOut: 0,
+					topNSecondHop: 0,
+					enforceBaseTokens: [await convertTokenToCurrency(token_obj('usds'))]
+				}
 			}
-		}
-	);
+		);
+	}
 	const generic_route = await router.route(
 		amount,
 		dstCurrency,
@@ -128,52 +128,100 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 		}
 	);
 	if (enforced_route || generic_route){
-		console.log("Found a route");
-		// console.log(route);
-		// console.log("decoding data");
-		let data = iface.decodeFunctionData('multicall', route.methodParameters.calldata);
-		console.log(route.methodParameters.calldata)
-		console.log(data[1]);
-		// let dat = data[1]
-		// let nextData = iface.decodeFunctionData('exactInput', dat);
-		// console.log(nextData)
-		var nc = await wallet.getTransactionCount();
-		const transaction = {
-			data: route.methodParameters.calldata,
-			nonce: nc,
-			to: V3_SWAP_ROUTER_ADDRESS,
-			value: BigNumber.from(0),
-			from: MY_ADDRESS,
-			gasPrice: BigNumber.from(route.gasPriceWei),
-			gasLimit: BigNumber.from(route.estimatedGasUsed).add(BigNumber.from("50000")),
-		};
-		const signedTx = await wallet.signTransaction(transaction);
-		console.log("Sending tx")
-		let balBefore =  await dstToken.balanceOf(MY_ADDRESS);
-		// console.log("Balance before "+ balBefore);
-		await web3Provider.sendTransaction(signedTx);
-		console.log("Spent 100000 SPA");
-		let balAfter = await dstToken.balanceOf(MY_ADDRESS);
-		// console.log("Balance after "+ balAfter);
-		let received = balAfter - balBefore;
-		let dec = await dstToken.decimals()
-		let receivedFloat = received / Math.pow(10, dec);
-		console.log('Received ', receivedFloat, choices[selectionOut]);
+		let answer, route;
+		answer = false;
+		route = null;
+		if(enforced_route) {
+			console.log('\nWith USDs enforced route you will get');
+			// Printing out minimum output amount
+			console.log(
+				enforced_route['trade']['outputAmount'].toSignificant(6),
+				enforced_route['trade']['outputAmount'].currency.symbol
+			);
+		}
+		if(generic_route) {
+			console.log('\nWith generic route you will get');
+			// Printing out minimum output amount
+			console.log(
+				generic_route['trade']['outputAmount'].toSignificant(6),
+				generic_route['trade']['outputAmount'].currency.symbol
+			);
+		}
+		if(enforced_route) {
+			answer = query('\nDo you want to swap via USDs enforced route?');
+			if (answer) {
+				route = enforced_route;
+			}
+		}
+		if(generic_route && !answer) {
+			answer = query('\nDo you want to swap via generic route?');
+			if (answer) {
+				route = generic_route;
+			}
+		}
+		if(route) {
+			// Printing data for debugging
+			let data = iface.decodeFunctionData('multicall', route.methodParameters.calldata);
+			console.log(data);
+			query('Continue');
+			// console.log(data[1][0]);
+			// let dat = data[1][0]
+			// let nextData = iface.decodeFunctionData('exactInput', dat);
+			// console.log(nextData);
+			// query('Continue');
+			// console.log(dat);
+			let balBefore =  await dstToken.balanceOf(MY_ADDRESS);
+			// const tx = await ROUTER_CONTRACT.exactInput(['0x5575552988a3a80504bbaeb1311674fcfd40ad4b000bb8d74f5255d557944cf7dd0e45ff521520002d57480001f4ff970a61a04b1ca14834a43f5de4533ebddb5cc8', '0xe0C97480CA7BDb33B2CD9810cC7f103188de4383', '20000000000000000000000', '100000000']);
+			console.log('Sending tx on contract');
+			const tx = await ROUTER_CONTRACT.multicall(data[0], data[1]);
+			await tx.wait();
+			let balAfter = await dstToken.balanceOf(MY_ADDRESS);
+			let received = balAfter - balBefore;
+			let dec = await dstToken.decimals()
+			let receivedFloat = received / Math.pow(10, dec);
+			console.log("Spent 10000 SPA");
+			console.log('Received ', receivedFloat, choices[selectionOut]);
+			query('Continue');
+			// let dat = data[1]
+			// let nextData = iface.decodeFunctionData('exactInput', dat);
+			// console.log(nextData)
+			// var nc = await wallet.getTransactionCount();
+			// Building transaction
+			// const transaction = {
+			// 	data: route.methodParameters.calldata,
+			// 	nonce: nc,
+			// 	to: V3_SWAP_ROUTER_ADDRESS,
+			// 	value: BigNumber.from(0),
+			// 	from: MY_ADDRESS,
+			// 	gasPrice: BigNumber.from(route.gasPriceWei),
+			// 	gasLimit: BigNumber.from(route.estimatedGasUsed).add(BigNumber.from("50000")),
+			// };
+			// const signedTx = await wallet.signTransaction(transaction);
+			// console.log("Sending tx")
+			// balBefore =  await dstToken.balanceOf(MY_ADDRESS);
+			// // console.log("Balance before "+ balBefore);
+			// await web3Provider.sendTransaction(signedTx);
+			// console.log("Spent 100000 SPA");
+			// balAfter = await dstToken.balanceOf(MY_ADDRESS);
+			// // console.log("Balance after "+ balAfter);
+			// received = balAfter - balBefore;
+			// dec = await dstToken.decimals()
+			// receivedFloat = received / Math.pow(10, dec);
+			// console.log('Received ', receivedFloat, choices[selectionOut]);
+		}
+		else {
+			console.log('Selected route didn\'t work');
+		}
 	}
-	else{
+	else {
 		console.log('No valid route found');
 	}
-	var answer = query('Continue?');
 }
 
 async function main() {
 	console.log("This script will help you to swap tokens using Uniswap\n");
-	const MAX_TOKENS = 9;
-	// await swapOnUniswap(1, 2);
-	for(let i=1; i < MAX_TOKENS; i++){
-		for(let j=i+1; j < MAX_TOKENS; j++){
-			await swapOnUniswap(i, j);
-		}
-	}
+	// Pass the index of tokens you want to swap
+	// swapOnUniswap(tokenInIndex, tokenOutIndex); refer choices.
+	await swapOnUniswap(1, 4);
 }
 main();
