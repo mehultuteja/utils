@@ -164,15 +164,9 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 			let data = iface.decodeFunctionData('multicall', route.methodParameters.calldata);
 			console.log(data);
 			query('Continue');
-			// console.log(data[1][0]);
-			// let dat = data[1][0]
-			// let nextData = iface.decodeFunctionData('exactInput', dat);
-			// console.log(nextData);
-			// query('Continue');
-			// console.log(dat);
 			let balBefore =  await dstToken.balanceOf(MY_ADDRESS);
 			// const tx = await ROUTER_CONTRACT.exactInput(['0x5575552988a3a80504bbaeb1311674fcfd40ad4b000bb8d74f5255d557944cf7dd0e45ff521520002d57480001f4ff970a61a04b1ca14834a43f5de4533ebddb5cc8', '0xe0C97480CA7BDb33B2CD9810cC7f103188de4383', '20000000000000000000000', '100000000']);
-			console.log('Sending tx on contract');
+			console.log('Sending tx');
 			const tx = await ROUTER_CONTRACT.multicall(data[0], data[1]);
 			await tx.wait();
 			let balAfter = await dstToken.balanceOf(MY_ADDRESS);
@@ -182,32 +176,6 @@ async function swapOnUniswap(selectionIn, selectionOut) {
 			console.log("Spent 10000 SPA");
 			console.log('Received ', receivedFloat, choices[selectionOut]);
 			query('Continue');
-			// let dat = data[1]
-			// let nextData = iface.decodeFunctionData('exactInput', dat);
-			// console.log(nextData)
-			// var nc = await wallet.getTransactionCount();
-			// Building transaction
-			// const transaction = {
-			// 	data: route.methodParameters.calldata,
-			// 	nonce: nc,
-			// 	to: V3_SWAP_ROUTER_ADDRESS,
-			// 	value: BigNumber.from(0),
-			// 	from: MY_ADDRESS,
-			// 	gasPrice: BigNumber.from(route.gasPriceWei),
-			// 	gasLimit: BigNumber.from(route.estimatedGasUsed).add(BigNumber.from("50000")),
-			// };
-			// const signedTx = await wallet.signTransaction(transaction);
-			// console.log("Sending tx")
-			// balBefore =  await dstToken.balanceOf(MY_ADDRESS);
-			// // console.log("Balance before "+ balBefore);
-			// await web3Provider.sendTransaction(signedTx);
-			// console.log("Spent 100000 SPA");
-			// balAfter = await dstToken.balanceOf(MY_ADDRESS);
-			// // console.log("Balance after "+ balAfter);
-			// received = balAfter - balBefore;
-			// dec = await dstToken.decimals()
-			// receivedFloat = received / Math.pow(10, dec);
-			// console.log('Received ', receivedFloat, choices[selectionOut]);
 		}
 		else {
 			console.log('Selected route didn\'t work');
